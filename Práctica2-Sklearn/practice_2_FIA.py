@@ -1,8 +1,10 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
+import random
+import statistics
 
+import numpy as np
+#import matplotlib.pyplot as plt
+#import pandas as pd
+import os
 
 """
 EXPERIMENT PARAMETERS
@@ -17,15 +19,23 @@ Switching default to True will show a model with default parameters.
 """
 DEFAULT = True
 TRAIN_MLP = True
-MLP_LAYERS_STRUCTURE = (50,50)      #Any array-like of shape(n_layers - 2,) / default=(100,)
-MLP_MAX_ITER = 500                  #Any integer / default=200
-MLP_ACTIVATION_FUNC = 'tanh'        #Can be 'identity', 'logistic', 'tanh' or 'relu' / default='relu'
-MLP_LEARNING_RATE = 'adaptive'    #Can be 'constant', 'invscaling' or 'adaptive' / default='constant'
-TREE_CRITERION = "entropy"          #Can be "gini", "entropy" or "log_loss" / default="gini"
-TREE_MAX_DEPTH = 8                  #Any integer / default=None
 
 if not os.path.exists(FOLDER_TO_SAVE_IMAGES):
     os.makedirs(FOLDER_TO_SAVE_IMAGES)
+
+def choose_mlp_parameters():
+    layers = [(50,), (50,50), (100,50), (100,100)]
+    max_iter = [150, 200, 250, 300, 350]
+    func = ['identity', 'logistic', 'tanh', 'relu']
+    lr = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+
+    return random.choice(layers), random.choice(max_iter), random.choice(func), random.choice(lr)
+
+def choose_tree_parameters():
+    crit = ["gini", "entropy", "log_loss"]
+    max_depth = [4, 6, 8, 10, 12, None]
+
+    return random.choice(crit), random.choice(max_depth)
 
 """
 Accuracy is not always the best metric to measure how good a trained model is, so we will get several metrics.
@@ -49,25 +59,16 @@ def get_metrics(true_labels, pred_labels):
     return accuracy, recall, precision, f1
 
 """
-Often it's useful sometimes to print the confussion matrix for a trained model.
-https://scikit-learn.org/stable/modules/generated/sklearn.metrics.ConfusionMatrixDisplay.html#sklearn.metrics.ConfusionMatrixDisplay
-"""
-
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-
-def get_confusion_matrix(test_labels, test_prediction, labels, folder_to_save = FOLDER_TO_SAVE_IMAGES, fold = None):
-    cm = confusion_matrix(test_labels, test_prediction, labels=labels)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
-    disp.plot(cmap='Blues', values_format='d')
-    plt.savefig(f"{folder_to_save}/confusion_matrix_fold_{fold}_{0}.png")
-
-"""
 Cross Validation
 In order to evaluate a training approach, the division of data into training and test subsets can lead to erroneous conclusions due to chance. 
 In order to make the conclusions more reliable, there is the Cross Validation technique. In this technique, several training and test divisions are created, 
 training is performed, metrics are obtained for each of them and finally an average of the metrics obtained is made.
 """
 
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.utils._testing import ignore_warnings
+
+#@ignore_warnings(category=ConvergenceWarning)
 def cross_validation(model, data, labels, K):
     """
     Use KFold to implement your own cross validation for a given model instance.
@@ -82,7 +83,7 @@ def cross_validation(model, data, labels, K):
     f1_list = []
 
     for i, (train_index, test_index) in enumerate(kf.split(data)):
-        print(f"Fold {i}")
+        #print(f"Fold {i}")
         # Get the train and splits data and labels.
         train_data = data.iloc[train_index]
         test_data = data.iloc[test_index]
@@ -106,9 +107,7 @@ def cross_validation(model, data, labels, K):
         precision_list.append(precision) # Here there is a point followed by an ellipsis (...).
         f1_list.append(f1) # Here there is a point followed by an ellipsis (...).
 
-        print(f"Accuracy={accuracy}, recall={recall}, precision={precision} and F1={f1}.")
-
-        get_confusion_matrix(test_labels, test_prediction, [0,1], fold=i)
+        #print(f"Accuracy={accuracy}, recall={recall}, precision={precision} and F1={f1}.")
 
     # Obtain the average for each list of metrics.
     average_accuracy = np.mean(acc_list)
@@ -116,7 +115,7 @@ def cross_validation(model, data, labels, K):
     average_precision = np.mean(precision_list)
     average_f1 = np.mean(f1_list)
 
-    print(f"Provided model with cross validation K={K} gets accuracy={average_accuracy}, recall={average_recall}, precision={average_precision} and F1={average_f1}.")
+    #print(f"Provided model with cross validation K={K} gets accuracy={average_accuracy}, recall={average_recall}, precision={average_precision} and F1={average_f1}.")
 
     return average_accuracy, average_recall, average_precision, average_f1
 
@@ -139,13 +138,13 @@ data.loc[:,'schoolsup'] = data['schoolsup'].map(lambda x: 1 if x == 'yes' else 0
 labels = student_performance.data.targets
 labels = labels['G3'].map(lambda x: 0 if x < 10 else 1)
 
-print("")
-print("List of features included in the dataset:")
-print(list(data.columns))
-print("")
-print("The table with the data looks as follows:")
-print(data)
-print("We have a total of {data.shape[0]} examples and {labels.shape[0]} labels with values {labels.unique()}.\n")
+#print("")
+#print("List of features included in the dataset:")
+#print(list(data.columns))
+#print("")
+#print("The table with the data looks as follows:")
+#print(data)
+#print(f"We have a total of {data.shape[0]} examples and {labels.shape[0]} labels with values {labels.unique()}.\n")
 
 """
 CLEAN DATA
@@ -155,8 +154,8 @@ In this exercies, remember to filter the dataframe to use only features in FEATU
 """
 
 data = data[FEATURES_TO_USE]
-print("The table with the CLEAN data looks as follows:")
-print(data)
+#print("The table with the CLEAN data looks as follows:")
+#print(data)
 
 if TRAIN_MLP:
     """
@@ -170,10 +169,24 @@ if TRAIN_MLP:
 
     if DEFAULT:
         model = MLPClassifier()
+        score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
+        print(f"The default metrics for MPL model are: {score}")
     else:
-        model = MLPClassifier(hidden_layer_sizes=MLP_LAYERS_STRUCTURE, max_iter=MLP_MAX_ITER,
-                              activation=MLP_ACTIVATION_FUNC, learning_rate=MLP_LEARNING_RATE)
-
+        best_score = 0
+        best_score_mean = 0
+        best_param = None
+        for r in range(20):
+            parameters = choose_mlp_parameters()
+            model = MLPClassifier(hidden_layer_sizes=parameters[0], max_iter=parameters[1],
+                                  activation=parameters[2], learning_rate_init=parameters[3])
+            score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
+            mean = statistics.mean(np.array(score))
+            if mean > best_score_mean:
+                best_score = score
+                best_score_mean = mean
+                best_param = parameters
+        print(f"The estimated optimal parameters are: {best_param}")
+        print(f"Those parameters return the following metrics: {best_score}")
 
 else:
     """
@@ -185,10 +198,21 @@ else:
 
     if DEFAULT:
         model = DecisionTreeClassifier()
+        score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
+        print(f"The default metrics for Decision Tree model are: {score}")
     else:
-        model = DecisionTreeClassifier(criterion=TREE_CRITERION, max_depth=TREE_MAX_DEPTH)
+        best_score = 0
+        best_score_mean = 0
+        best_param = None
+        for r in range(20):
+            parameters = choose_mlp_parameters()
+            model = DecisionTreeClassifier(criterion=parameters[0], max_depth=parameters[1])
 
-"""
-TRAIN USING CROSS VALIDATION
-"""
-cross_validation(model, data, labels, NUMBER_OF_FOLDS)
+            score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
+            mean = statistics.mean(np.array(score))
+            if mean > best_score_mean:
+                best_score = score
+                best_score_mean = mean
+                best_param = parameters
+        print(f"The estimated optimal parameters are: {best_param}")
+        print(f"Those parameters return the following metrics: {best_score}")

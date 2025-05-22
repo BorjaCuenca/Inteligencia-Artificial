@@ -1,10 +1,14 @@
 import itertools
 import statistics
-
 import numpy as np
-#import matplotlib.pyplot as plt
-#import pandas as pd
-#import os
+
+from sklearn.neural_network import MLPClassifier
+from tqdm import tqdm
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.utils._testing import ignore_warnings
+from sklearn.model_selection import KFold
+from ucimlrepo import fetch_ucirepo
 
 """
 EXPERIMENT PARAMETERS
@@ -16,7 +20,6 @@ FEATURES_TO_USE = ["studytime", "failures", "schoolsup", "health", "absences"]
 These will determine which parameter are used in both MLP and Decision Tree models.
 Switching default to True will show a model with default parameters.
 """
-DEFAULT = False
 TRAIN_MLP = True
 
 """
@@ -33,7 +36,7 @@ DECISION TREE PARAMETERS
 CRIT = ["gini", "entropy", "log_loss"]
 MAX_DEPTH = [4, 6, 8, 10, 12, None]
 
-def print_introduction():
+def print_introduction(data):
     print("\nWelcome! In this project, we will be working with the Student Performance dataset obtained from the UCI "
           "Machine Learning Repository.")
     print("This dataset contains information on various personal, academic, and social factors that may influence a "
@@ -50,7 +53,7 @@ def print_introduction():
     print("\nHere is the cleaned subset of the dataset, showing only the most relevant features for our analysis:")
     print(data)
     print("\nDISCLAIMER: This code may not provide the same result every time, as some parameters, such as maximum "
-          "iterations, might be insufficient and cause the model to be trained differently in each execution.")
+          "iterations, might be insufficient and cause the model to be trained differently in each execution.\n")
 
 """
 METRICS
@@ -63,17 +66,10 @@ def get_metrics(true_labels, pred_labels):
     FP = np.sum((true_labels == 0) & (pred_labels == 1))
     FN = np.sum((true_labels == 1) & (pred_labels == 0))
 
-    accuracy = (TP+TN)/(TP+TN+FP+FN)
-    if TP == 0:
-        recall = 0
-        precision = 0
-    else:
-        recall = TP/(TP+FN)
-        precision = TP/(TP+FP)
-    if precision + recall == 0:
-        f1 = 0
-    else:
-        f1 = 2*precision*recall/(precision+recall)
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    recall = TP / (TP + FN) if (TP + FN) else 0
+    precision = TP / (TP + FP) if (TP + FP) else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0
 
     return accuracy, recall, precision, f1
 
@@ -86,13 +82,9 @@ training and test divisions are created, training is performed, metrics are obta
 an average of the metrics obtained is made.
 """
 
-from sklearn.exceptions import ConvergenceWarning
-from sklearn.utils._testing import ignore_warnings
-
 @ignore_warnings(category=ConvergenceWarning)
 def cross_validation(model, data, labels, K):
 
-    from sklearn.model_selection import KFold
     kf = KFold(n_splits=K)
 
     acc_list = []
@@ -132,12 +124,63 @@ def cross_validation(model, data, labels, K):
     return average_accuracy, average_recall, average_precision, average_f1
 
 """
+MODEL SEARCHING FUNCTION DEFINITIONS
+In order to simplify the code, some methods are defined for their later use.
+
+*CAUTION* --> If new parameters were to be added, build_model method MUST BE modified.
+"""
+
+if TRAIN_MLP:
+    def build_model(params):
+        return MLPClassifier(hidden_layer_sizes=params[0], max_iter=params[1],
+                          activation=params[2], learning_rate_init=params[3])
+else:
+    def build_model(params):
+        return DecisionTreeClassifier(criterion=params[0], max_depth=params[1])
+
+def default_classifier(data, labels):
+    def_params = ((100,), 200, 'relu', 0.001) if TRAIN_MLP else ('gini', None)
+    def_model = build_model(def_params)
+    def_score = cross_validation(def_model, data, labels, NUMBER_OF_FOLDS)
+    model_name = "MLP" if TRAIN_MLP else "Decision Tree"
+    print(f"\nThe default metrics for {model_name} model are: ")
+    print(f"Accuracy={def_score[0]}, Precision={def_score[1]}, Recall={def_score[2]}, F1={def_score[3]}")
+
+    def_score_mean = statistics.mean(np.asarray(def_score))
+
+    return def_score, def_score_mean, def_params
+
+def opt_model_search (def_score, data, labels):
+    print("\nSearching for optimal models...")
+    combinations = itertools.product(LAYERS, MAX_ITER, FUNC, LR) if TRAIN_MLP else itertools.product(CRIT, MAX_DEPTH)
+    counter = 0
+
+    best_score = def_score[0]
+    best_score_mean = def_score[1]
+    best_param = def_score[2]
+
+    for parameters in tqdm(combinations, desc="Testing models"):
+        counter += 1
+        model = build_model(parameters)
+        score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
+        mean = statistics.mean(np.array(score))
+        if mean > best_score_mean:
+            print("\nNew best model found!")
+            print(f"The model number {counter} has been considered optimal.\n")
+            print("\nSearching for optimal models...")
+            best_score = score
+            best_score_mean = mean
+            best_param = parameters
+    print("Search complete.")
+    print(f"\nThe estimated optimal parameters are: {best_param}")
+    print("Those parameters return the following metrics: ")
+    print(f"Accuracy={best_score[0]}, Precision={best_score[1]}, Recall={best_score[2]}, F1={best_score[3]}")
+
+"""
 LOAD DATA
 Load dataset included in scikit learn. This is a binary dataset, so the label feature can only be 1 or 0.
 It is loaded as a Pandas dataframe and with (data, labels) format.
 """
-from ucimlrepo import fetch_ucirepo
-
 # fetch dataset
 student_performance = fetch_ucirepo(id=320)
 
@@ -147,92 +190,19 @@ labels = student_performance.data.targets
 
 """
 CLEAN DATA
-Now data should be cleaned (discard or fill missing data, use some technique to balance the amount of examples 
-for each label, etc).
-Some data is converted to binary values in order to implement MLP correctly.
+Now we clean the data. Some data is converted to binary values in order to implement MLP correctly.
 """
 data.loc[:,'schoolsup'] = data['schoolsup'].map(lambda x: 1 if x == 'yes' else 0)
 labels = labels['G3'].map(lambda x: 0 if x < 10 else 1)
 
 data = data[FEATURES_TO_USE].head(500)
+labels = labels.head(500)
 
-print_introduction()
+"""
+MODEL SEARCHING
+We search for the best model among every combination of the predefined parameters
+"""
+print_introduction(data)
 
-if TRAIN_MLP:
-    """
-    MULTI-LAYER PERCEPTRON IMPLEMENTATION
-    """
-    from sklearn.neural_network import MLPClassifier
-
-    if DEFAULT:
-        # Asigno 900 y 0 a las iter. máximas y la semilla respect. para que los resultados con los
-        # parámetros por defecto sean siempre los mismos.
-        model = MLPClassifier(max_iter=900, random_state=0)
-        score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
-        print(f"The default metrics for MPL model are: {score}")
-    else:
-        best_score = 0
-        best_score_mean = 0
-        best_param = None
-        print("\nSearching for optimal models...")
-
-        combinations = itertools.product(LAYERS, MAX_ITER, FUNC, LR)
-        counter = 0
-
-        from tqdm import tqdm
-        for parameters in tqdm(combinations, desc="Testing models"):
-            counter += 1
-            model = MLPClassifier(hidden_layer_sizes=parameters[0], max_iter=parameters[1],
-                                  activation=parameters[2], learning_rate_init=parameters[3])
-            score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
-            mean = statistics.mean(np.array(score))
-            if mean > best_score_mean:
-                print("\nNew best model found!")
-                print(f"The model number {counter} has been considered optimal.\n")
-                print("\nSearching for optimal models...")
-                best_score = score
-                best_score_mean = mean
-                best_param = parameters
-        print("No new optimal model found.")
-        print(f"\nThe estimated optimal parameters are: {best_param}")
-        print(f"Those parameters return the following metrics: {best_score}")
-
-else:
-    """
-    DECISION TREE IMPLEMENTATION
-    """
-
-    from sklearn.tree import DecisionTreeClassifier
-
-    if DEFAULT:
-        model = DecisionTreeClassifier()
-        score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
-        print(f"The default metrics for Decision Tree model are: {score}")
-    else:
-        best_score = 0
-        best_score_mean = 0
-        best_param = None
-        print("\nSearching for optimal models...")
-
-        combinations = itertools.product(CRIT, MAX_DEPTH)
-        counter = 0
-
-        from tqdm import tqdm
-        for parameters in tqdm(combinations, desc="Testing models"):
-            model = DecisionTreeClassifier(criterion=parameters[0], max_depth=parameters[1])
-
-            score = cross_validation(model, data, labels, NUMBER_OF_FOLDS)
-            mean = statistics.mean(np.array(score))
-            if mean > best_score_mean:
-                print("\nNew best model found!")
-                print(f"The model number {counter} has been considered optimal.\n")
-                print("\nSearching for optimal models...")
-                best_score = score
-                best_score_mean = mean
-                best_param = parameters
-            print("No new optimal model found.")
-            print(f"\nThe estimated optimal parameters are: {best_param}")
-            print(f"Those parameters return the following metrics: {best_score}")
-
-        print(f"The estimated optimal parameters are: {best_param}")
-        print(f"Those parameters return the following metrics: {best_score}")
+def_score = default_classifier(data, labels)
+opt_model_search(def_score, data, labels)
